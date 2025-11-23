@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <title>粤语演讲稿自动注音（Jyutping，字典版）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+      color: #222;
+    }
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 1.3rem;
+      margin: 0 0 8px;
+    }
+    .desc {
+      font-size: 0.85rem;
+      color: #666;
+      margin-bottom: 12px;
+    }
+    textarea {
+      width: 100%;
+      height: 160px;
+      resize: vertical;
+      padding: 8px;
+      font-size: 1rem;
+      font-family: inherit;
+    }
+    .controls {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    button {
+      padding: 6px 14px;
+      font-size: 0.9rem;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      cursor: pointer;
+      background: #fff;
+    }
+    button.primary {
+      background: #1677ff;
+      border-color: #1677ff;
+      color: #fff;
+    }
+    button:hover {
+      filter: brightness(0.97);
+    }
+    #dictStatus {
+      font-size: 0.8rem;
+      color: #888;
+    }
+    #outputWrapper {
+      margin-top: 16px;
+      padding: 12px;
+      background: #fff;
+      border-radius: 6px;
+      min-height: 80px;
+      line-height: 1.9;
+      font-size: 1.1rem;
+      word-wrap: break-word;
+      overflow-x: auto;
+    }
+    ruby.char-block {
+      display: inline-flex;
+      flex-direction: column-reverse; /* 把 <rt> 在视觉上放在 <rb> 之上 */
+      text-align: center;
+      margin: 1px 1px;
+      padding: 0 1px;
+      align-items: center;
+    }
+    ruby.char-block rb {
+      font-size: 1.1em;
+      display: block;
+      line-height: 1;
+    }
+    ruby.char-block rt {
+      font-size: 0.7em;
+      color: #555;
+      display: block;
+      margin-bottom: 2px; /* 注音与字之间的小间距 */
+    }
+    .char-missing {
+      display: inline-block;
+      margin: 1px 1px;
+      color: #d4380d;
+      border-bottom: 1px dotted #d4380d;
+    }
+    .legend {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #888;
+    }
+    .legend span.color-box {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 4px;
+      vertical-align: middle;
+      border-radius: 2px;
+      background: #d4380d;
+    }
+    @media (max-width: 600px) {
+      textarea {
+        height: 140px;
+      }
+      #outputWrapper {
+        font-size: 1.05rem;
+      }
+      /* 保持移动端注音稍小且间距更紧凑 */
+      ruby.char-block rt {
+        font-size: 0.65em;
+        margin-bottom: 1px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>粤语演讲稿自动注音（Jyutping，字典版）</h1>
+    <div class="desc">
+      1. 本工具会从 <code>char2jp.json</code> 读取「字 → Jyutping」字典。<br>
+      2. 粘贴演讲稿后点击「生成注音」，按字标出标准粤拼。<br>
+      3. 红色虚线的字 = 字典里没有这个字的拼音。
+    </div>
+
+    <textarea id="input" placeholder="在这里粘贴你的演讲稿文本…"></textarea>
+
+    <div class="controls">
+      <button id="annotateBtn" class="primary" disabled>生成注音</button>
+      <button id="readAllBtn" type="button">诵读全文</button>
+      <button id="downloadImgBtn" type="button">下载图片</button>
+      <span id="dictStatus">正在加载字典…</span>
+    </div>
+
+    <div id="outputWrapper">
+      <div id="output"></div>
+    </div>
+
+    <div class="legend">
+      <span class="color-box"></span>
+      <span>红色带虚线下划线 = 字典中缺少该字的 Jyutping（可视为提示你字典不完整）。</span>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script>
+    let char2jp = {};
+    let dictLoaded = false;
+
+    const annotateBtn = document.getElementById('annotateBtn');
+    const readAllBtn = document.getElementById('readAllBtn');
+    const downloadImgBtn = document.getElementById('downloadImgBtn');
+    const dictStatus = document.getElementById('dictStatus');
+    const inputEl = document.getElementById('input');
+    const outputEl = document.getElementById('output');
+
+    // 1. 加载字典文件
+    async function loadDict() {
+      try {
+        const res = await fetch('char2jp.json', { cache: 'no-cache' });
+        if (!res.ok) {
+          throw new Error('HTTP ' + res.status);
+        }
+        const data = await res.json();
+        if (!data || typeof data !== 'object') {
+          throw new Error('JSON 格式错误');
+        }
+        char2jp = data;
+        dictLoaded = true;
+        annotateBtn.disabled = false;
+        dictStatus.textContent = `字典加载成功，当前共 ${Object.keys(char2jp).length} 个字。`;
+      } catch (err) {
+        dictStatus.textContent = '字典加载失败，请确认与 char2jp.json 在同一目录。错误：' + err.message;
+        annotateBtn.disabled = true;
+      }
+    }
+
+    loadDict();
+
+    // 2. 生成注音 HTML
+    function annotateText(text) {
+      const parts = [];
+      for (const ch of text) {
+        if (ch === '\n') {
+          parts.push('<br>');
+          continue;
+        }
+        const code = ch.codePointAt(0);
+        const isCJK = (code >= 0x4E00 && code <= 0x9FFF);
+        const jp = char2jp[ch];
+
+        if (isCJK && jp) {
+          parts.push(
+            `<ruby class="char-block" data-char="${ch}" data-jyutping="${jp}">
+               <rb>${ch}</rb>
+               <rt>${jp}</rt>
+             </ruby>`
+          );
+        } else if (isCJK) {
+          parts.push(
+            `<span class="char-missing" title="字典无此字拼音">${ch}</span>`
+          );
+        } else {
+          // 非汉字
+          if (ch === ' ') {
+            parts.push('&nbsp;');
+          } else {
+            parts.push(ch);
+          }
+        }
+      }
+      return parts.join('');
+    }
+
+    // 3. 点击按钮生成注音
+    annotateBtn.addEventListener('click', () => {
+      if (!dictLoaded) {
+        alert('字典尚未加载完成。');
+        return;
+      }
+      const text = inputEl.value || '';
+      const html = annotateText(text);
+      outputEl.innerHTML = html;
+      enableCharClickRead(); // 新增：生成后绑定点读
+    });
+
+    // 点读功能：为所有 ruby.char-block 添加点击事件
+    function enableCharClickRead() {
+      const charBlocks = document.querySelectorAll('ruby.char-block');
+      charBlocks.forEach(ruby => {
+        ruby.style.cursor = 'pointer';
+        ruby.title = '点击点读';
+        ruby.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const ch = this.getAttribute('data-char');
+          if (!ch) return;
+          speakChar(ch);
+        });
+      });
+    }
+
+    // 使用 Web Speech API 朗读单个字，优先粤语
+    function speakChar(ch) {
+      if (!window.speechSynthesis) {
+        alert('当前浏览器不支持语音朗读');
+        return;
+      }
+      const utter = new window.SpeechSynthesisUtterance(ch);
+      // 优先找粤语 voice
+      const voices = window.speechSynthesis.getVoices();
+      let yueVoice = voices.find(v => v.lang === 'zh-HK' || v.lang === 'yue-HK');
+      if (!yueVoice) {
+        // 兼容部分浏览器 voice.lang 可能是 zh_HK
+        yueVoice = voices.find(v => v.lang && v.lang.toLowerCase().includes('zh') && v.lang.toLowerCase().includes('hk'));
+      }
+      if (yueVoice) {
+        utter.voice = yueVoice;
+      } else {
+        // 没有粤语 voice 就用默认中文
+        const zhVoice = voices.find(v => v.lang && v.lang.startsWith('zh'));
+        if (zhVoice) utter.voice = zhVoice;
+      }
+      utter.rate = 0.9;
+      window.speechSynthesis.cancel(); // 防止叠音
+      window.speechSynthesis.speak(utter);
+    }
+
+    // 朗读全文功能
+    readAllBtn.addEventListener('click', () => {
+      const text = inputEl.value || '';
+      if (!text.trim()) {
+        alert('请输入要朗读的内容');
+        return;
+      }
+      speakText(text);
+    });
+
+    // 朗读整段文本，优先粤语
+    function speakText(text) {
+      if (!window.speechSynthesis) {
+        alert('当前浏览器不支持语音朗读');
+        return;
+      }
+      const utter = new window.SpeechSynthesisUtterance(text);
+      const voices = window.speechSynthesis.getVoices();
+      let yueVoice = voices.find(v => v.lang === 'zh-HK' || v.lang === 'yue-HK');
+      if (!yueVoice) {
+        yueVoice = voices.find(v => v.lang && v.lang.toLowerCase().includes('zh') && v.lang.toLowerCase().includes('hk'));
+      }
+      if (yueVoice) {
+        utter.voice = yueVoice;
+      } else {
+        const zhVoice = voices.find(v => v.lang && v.lang.startsWith('zh'));
+        if (zhVoice) utter.voice = zhVoice;
+      }
+      utter.rate = 0.9;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utter);
+    }
+
+    // 4. 下载注音图片
+    downloadImgBtn.addEventListener('click', async () => {
+      const outputWrapper = document.getElementById('outputWrapper');
+      if (!outputWrapper) return;
+      // 使用 html2canvas 渲染
+      html2canvas(outputWrapper, {
+        backgroundColor: '#fff',
+        scale: window.devicePixelRatio || 2
+      }).then(canvas => {
+        const link = document.createElement('a');
+        link.download = 'jyutping.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      });
+    });
+  </script>
+</body>
+</html>
